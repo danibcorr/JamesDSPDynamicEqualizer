@@ -10,7 +10,6 @@ import tensorflow as tf
 from tensorflow.keras import backend as K
 from ..Layers.APS import CircularPad, APSDownsampling
 from ..Layers.ResidualBlock import ResidualBlock
-from ..Layers.SPP import SpatialPyramidPooling
 
 
 # --------------------------------------------------------------------------------------------
@@ -27,7 +26,7 @@ bias_initial = tf.keras.initializers.Constant(value = 0)
 # --------------------------------------------------------------------------------------------   
 
 
-def mcnn_classifier(input_shape, num_classes, residual_copies = [3, 3, 3, 3, 3], num_layers = 5, filter_sizes = [32, 32, 64, 64, 64], kernel_size = [3, 3, 3, 3, 3]):
+def mcnn_classifier(input_shape, num_classes, residual_copies = [2, 2, 2, 2, 2], num_layers = 5, filter_sizes = [32, 32, 64, 64, 64], kernel_size = [3, 3, 3, 3, 3]):
 
     # Input data
     inputs = layers.Input(input_shape, name = "Input")

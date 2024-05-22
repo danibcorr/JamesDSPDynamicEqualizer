@@ -5,7 +5,6 @@
 
 from tensorflow.keras import layers
 from tensorflow import keras
-from .CBAM import CBAM
 from .APS import CircularPad
 import tensorflow as tf
 import tensorflow_probability as tfp

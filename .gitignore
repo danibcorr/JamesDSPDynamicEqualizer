@@ -1,6 +1,7 @@
 # Ignore datasets files
 dataset
 prototypes
+model/trained_model
 
 # Ignore Python-related files and directories
 *.pyc
