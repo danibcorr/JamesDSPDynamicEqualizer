@@ -6,75 +6,64 @@ import librosa
 import numpy as np
 import matplotlib.pyplot as plt
 import io
+from PIL import Image
 
 # %% Functions
 
-def generate_spectrogram_image(S_log: np.ndarray, sr: int, display: bool = False) -> np.ndarray:
-
+def generate_spectrogram_image(S_log: np.ndarray, target_size: tuple = (224, 224)) -> np.ndarray:
+    
     """
     Generate and return the spectrogram image of the audio signal.
 
-    Parameters:
+    Args:
         S_log (np.ndarray): Log-scaled spectrogram.
-        sr (int): Sampling rate of the audio signal.
-        display (bool): Whether to display the spectrogram image. Default is False.
+        target_size (tuple): The target size of the spectrogram image. Default is (224, 224).
 
     Returns:
         np.ndarray: Image array of the spectrogram.
     """
 
-    plt.figure(figsize = (12, 8))
-    librosa.display.specshow(S_log, sr = sr, x_axis = 'time', y_axis = 'mel')
-    plt.colorbar(format = '%+2.0f dB')
-    plt.title('Spectrogram')
-    plt.tight_layout()
-
-    if display:
-
-        plt.show()
-
-    # Save the plot to a buffer
-    buf = io.BytesIO()
-    plt.savefig(buf, format = 'png')
-    buf.seek(0)
-    plt.close()
+    # Normalize the spectrogram
+    S_normalized = (S_log - S_log.min()) / (S_log.max() - S_log.min()) * 255
     
-    # Read the buffer into an image array
-    img = plt.imread(buf, format = 'png')
-    buf.close()
+    # Convert to image and resize
+    img = Image.fromarray(S_normalized)
+    img = img.resize(target_size)
+    S_resized = np.array(img)
+    
+    return S_resized
 
-    return img
 
-def process_audio_in_real_time(SAMPLE_RATE: int, RECORD_SEC: int, display_spectrogram: bool = False) -> None:
+def process_audio_in_real_time(SAMPLE_RATE: int = 22050, RECORD_SEC: int = 30, target_size: tuple = (224, 224)) -> np.ndarray:
     
     """
-    Record and process audio in real time to display its spectrogram.
+    Record and process audio in real time to return its spectrogram.
 
-    Parameters:
+    Args:
         SAMPLE_RATE (int): Sampling rate of the audio signal.
         RECORD_SEC (int): Number of seconds to record audio.
-        display_spectrogram (bool): Whether to display the spectrogram. Default is False.
+        target_size (tuple): The target size of the spectrogram image. Default is (224, 224).
 
     Returns:
-        None
+        np.ndarray: The spectrogram image array of the recorded audio.
     """
 
     with sc.get_microphone(id = str(sc.default_speaker().name), include_loopback = True).recorder(samplerate = SAMPLE_RATE) as mic:
         
-        # Initialize an empty array to store audio data
-        all_data = np.empty((0, 1))
+        print(f"Recording audio...")
 
-        # Record audio in chunks and process each chunk
+        # Initialize an empty array to store audio data
+        chunk = np.empty((0,))
+
+        # Record audio in chunks
         for _ in range(int(SAMPLE_RATE * RECORD_SEC / 1024)):
 
             data = mic.record(numframes = 1024)
-            all_data = np.append(all_data, data[:, 0])
-            
-            # Compute the spectrogram using Librosa
-            S = librosa.feature.melspectrogram(y = all_data, sr = SAMPLE_RATE, n_mels = 128)
-            
-            # Convert the spectrogram to a log-scale representation
-            S_log = librosa.power_to_db(S, ref = np.max)
-            
-            # Display the spectrogram
-            generate_spectrogram_image(S_log, SAMPLE_RATE, display_spectrogram)
+            chunk = np.append(chunk, data[:, 0])
+        
+        # Compute the spectrogram using Librosa
+        melspectrogram = librosa.feature.melspectrogram(y=chunk, sr=SAMPLE_RATE, n_mels=128)
+        melspectrogram = librosa.power_to_db(melspectrogram, ref=np.max)
+        
+        # Generate the spectrogram image
+        return generate_spectrogram_image(melspectrogram, target_size=target_size)

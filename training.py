@@ -8,14 +8,19 @@ from tensorflow import keras
 from tensorflow.keras import layers, mixed_precision
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 import numpy as np
-import os
+from sklearn.metrics import confusion_matrix
 import random
 from sklearn.model_selection import train_test_split
-from keras_cv.layers import CutMix, ChannelShuffle, RandomCutout, RandAugment
 from sklearn.utils.class_weight import compute_class_weight
 from PIL import Image
 import dask.array as da
 from dask.delayed import delayed
+from model.architecture import build_model_pretrained
+import pickle
+import matplotlib.pyplot as plt
+import seaborn as sns
+from model.schedulers.warmupcosine import WarmUpCosine
+from model.architecture import build_model_pretrained
 
 # %% Let's use mixed precision to reduce memory consumption.
 
@@ -25,9 +30,48 @@ mixed_precision.set_global_policy('mixed_float16')
 
 SEED = 42
 BATCH_SIZE = 32
-EPOCHS = 100
+EPOCHS = 1
+INPUT_SHAPE = (224, 224, 3)
+
+# String to number class
+DICT_LABELS = {
+    "classical": 0, 
+    "flamenco": 1, 
+    "hiphop": 2, 
+    "jazz": 3, 
+    "pop": 4,
+    "r&b": 5,
+    "reggaeton": 6
+}
 
 # %% Functions
+
+def create_label_dict(labels: np.ndarray) -> dict:
+    
+    """
+    Create a dictionary mapping label indices to label names.
+
+    Args:
+        labels (np.ndarray): List of unique labels.
+
+    Returns:
+        dict: Label dictionary.
+    """
+    
+    return {i: label for i, label in enumerate(labels)}
+
+def save_label_dict(label_dict: dict, file_path: str) -> None:
+
+    """
+    Save the label dictionary to a file using pickle.
+
+    Args:
+        file_path (str): File path to save the dictionary.
+    """
+
+    with open(file_path, 'wb') as f:
+
+        pickle.dump(label_dict, f)
 
 def seed_init(seed: int) -> None:
 
@@ -48,13 +92,7 @@ def seed_init(seed: int) -> None:
     tf.random.set_seed(seed)
     random.seed(seed)
 
-import os
-import numpy as np
-from PIL import Image
-from dask.delayed import delayed
-import dask.array as da
-
-def load_image(file_path, input_shape):
+def load_image(file_path: str, input_shape: tuple) -> np.ndarray or None:
 
     """
     Load an image from a file path and resize it to the input shape.
@@ -87,9 +125,10 @@ def load_image(file_path, input_shape):
 
         # Print an error message if there's an issue loading the image
         print(f"Error loading image: {file_path}")
+
         return None
 
-def load_data_from_folder(path, input_shape=(224, 224)):
+def load_data_from_folder(path: str, input_shape: tuple = INPUT_SHAPE) -> tuple:
 
     """
     Load image data from a folder structure where each subfolder represents a class.
@@ -114,7 +153,7 @@ def load_data_from_folder(path, input_shape=(224, 224)):
         file_paths = [os.path.join(class_folder, file_name) for file_name in os.listdir(class_folder) if file_name.endswith('.png')]
         
         # Load the images in parallel using dask
-        img_arrays = [delayed(load_image)(file_path, input_shape) for file_path in file_paths]
+        img_arrays = [delayed(load_image)(file_path, (input_shape[0], input_shape[1])) for file_path in file_paths]
         img_arrays = da.compute(*img_arrays)
         
         # Filter out any images that failed to load
@@ -122,10 +161,34 @@ def load_data_from_folder(path, input_shape=(224, 224)):
         
         # Add the loaded images and labels to the data and labels lists
         data.extend(img_arrays)
-        labels.extend([i] * len(img_arrays))
+        labels.extend([DICT_LABELS[class_name]] * len(img_arrays))
 
     # Convert the data and labels lists to numpy arrays and return them
-    return np.array(data, dtype=np.uint8), np.array(labels)
+    return np.array(data, dtype = np.uint8), np.array(labels)
+
+def create_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray, labels: list) -> None:
+
+    """
+    Create a confusion matrix from true labels and predicted labels.
+
+    Args:
+        y_true (np.ndarray): True labels.
+        y_pred (np.ndarray): Predicted labels.
+        labels (list): List of unique labels.
+
+    Returns:
+        np.ndarray: Confusion matrix.
+    """
+
+    # Calculate the confusion matrix
+    conf_mat = confusion_matrix(y_true, y_pred, labels=labels)
+
+    # Display the confusion matrix
+    plt.figure(figsize = (10, 7))
+    sns.heatmap(conf_mat, annot = True, fmt = 'd', cmap = 'Reds')
+    plt.xlabel('Predict', fontsize = 15, weight = 'bold')
+    plt.ylabel('True', fontsize = 15, weight = 'bold')
+    plt.show()
 
 def create_data_generators(train_data: np.ndarray, train_labels: np.ndarray, val_data: np.ndarray, val_labels: np.ndarray, batch_size: int = BATCH_SIZE) -> tuple:
     
@@ -145,7 +208,7 @@ def create_data_generators(train_data: np.ndarray, train_labels: np.ndarray, val
     """
 
     # Create an instance of the ImageDataGenerator for training data
-    train_datagen = ImageDataGenerator(horizontal_flip = True)
+    train_datagen = ImageDataGenerator()
     
     # Create an instance of the ImageDataGenerator for validation data
     val_datagen = ImageDataGenerator()
@@ -160,80 +223,6 @@ def create_data_generators(train_data: np.ndarray, train_labels: np.ndarray, val
 
     # Return the training and validation data generators
     return train_generator, val_generator
-
-def data_augmentation(data: np.ndarray, labels: np.ndarray, seed: int) -> None:
-
-    data = {"images": data, "labels": tf.cast(labels, dtype = np.float32)}
-
-    cutmix_layer = CutMix(alpha = 1.0, seed = seed)
-    channel_shuffle_layer = ChannelShuffle(groups = 3, seed = seed)
-
-    data = cutmix_layer(data)
-    data = channel_shuffle_layer(data)
-
-    return data["images"], data["labels"]
-
-def build_model(input_shape: tuple, num_classes: int, fc_layers: list = [256, 128], dropout: float = 0.2) -> keras.Model:
-    
-    """
-    Build a classification model using a pre-trained VGG16 model.
-
-    Args:
-        input_shape (tuple): The shape of the input data.
-        num_classes (int): The number of classes in the classification problem.
-        fc_layers (list): A list of integers specifying the number of neurons in each fully connected layer. Defaults to [256, 128].
-        dropout (float): The dropout rate for the fully connected layers. Defaults to 0.2.
-
-    Returns:
-        keras.Model: The built classification model.
-    """
-
-    # Load the pre-trained VGG16 model
-    base_model = tf.keras.applications.VGG16(weights = "imagenet", include_top = False, input_shape = (input_shape[0], input_shape[1], 3))
-    
-    # Freeze the layers of the pre-trained model due to limited memory
-    for layer in base_model.layers:
-
-        # Set the trainable attribute of each layer to False
-        layer.trainable = False
-
-    # Create an input layer to introduce the data
-    inputs = layers.Input(shape=(input_shape[0], input_shape[1], 3))
-    
-    # Preprocess the input data to apply the adjustments of VGG16
-    x = tf.keras.applications.vgg16.preprocess_input(inputs)
-    
-    # Use the features obtained from the pre-trained model
-    x = base_model(x)
-    
-    # Reduce the dimensionality using global average pooling
-    x = layers.GlobalAveragePooling2D()(x)
-    
-    # Use a few fully connected layers (MLPs)
-    for fc in fc_layers:
-
-        # Add a dense layer with the specified number of neurons and Gelu activation
-        x = layers.Dense(fc, activation='gelu')(x)
-
-        # Add a dropout layer with the specified dropout rate
-        x = layers.Dropout(dropout)(x)
-    
-    # Get the output of the classification using a softmax activation function
-    outputs = layers.Dense(num_classes, activation="softmax")(x)
-    
-    # Create the model
-    model = tf.keras.Model(inputs=inputs, outputs=outputs, name="ClassifierModel")
-    
-    # Compile the model with the AdamW optimizer and categorical cross-entropy loss
-    model.compile(optimizer=tf.keras.optimizers.AdamW(learning_rate = 1e-3, weight_decay = 2e-4), 
-                  loss=tf.keras.losses.CategoricalCrossentropy(), 
-                  metrics=['accuracy'])
-    
-    # Print the summary of the model
-    print(model.summary())
-    
-    # Return the model
-    return model
 
 def class_weights_calculation(labels: np.ndarray, y_train: np.ndarray) -> dict:
 
@@ -300,13 +289,13 @@ def evaluate_model(model: keras.Model, val_dataset: tf.data.Dataset) -> float:
     # Return the accuracy
     return accuracy
 
-def main(path: str) -> None:
+def main(dataset_path: str, model_save_path: str, labels_dict_path: str) -> None:
 
     """
     Main function to execute the image classification pipeline.
 
     Args:
-        path (str): The path to the folder containing the image data.
+        dataset_path (str): The path to the folder containing the image data.
 
     Returns:
         None
@@ -316,21 +305,15 @@ def main(path: str) -> None:
     seed_init(seed = SEED)
 
     # Load data from the specified folder
-    data, labels = load_data_from_folder(path)
-    num_classes = len(np.unique(labels))
+    data, labels = load_data_from_folder(dataset_path)
+    classes = np.unique(labels)
+    num_classes = len(classes)
 
     # Print information about the data
     print(f"Num data: {data.shape}")
     print(f"Num classes: {num_classes}")
-
-    """
-    # Apply data augmentation
-    data, labels = data_augmentation(data, labels, SEED)
-
-    # Print information about the data
-    print(f"Num data: {data.shape}")
-    print(f"Num classes: {num_classes}")
-    """
+    print(f"Min val: {np.min(data)}")
+    print(f"Max val: {np.max(data)}")
 
     # Check if the number of images is equal to the number of labels
     assert len(data) == len(labels), "Number of images is not equal to the number of labels"
@@ -347,19 +330,39 @@ def main(path: str) -> None:
     # Create data generators for the training and validation data
     train_dataset, val_dataset = create_data_generators(train_data, train_labels, val_data, val_labels)
 
-    # Build and train the classification model
-    input_shape = (train_data.shape[1], train_data.shape[2], 3)
-    model = build_model(input_shape, num_classes)
+    # Total steps for the scheduler
+    total_steps = int((len(train_data) / BATCH_SIZE) * EPOCHS)
+    warmup_steps = int(total_steps * 0.15)
+    scheduled_lrs = WarmUpCosine(lr_start = 1e-5, lr_max = 1e-3, warmup_steps = warmup_steps, total_steps = total_steps)
+                 
+    # Build the classification model
+    model = build_model_pretrained(INPUT_SHAPE, num_classes)
+
+    # Compile the model with the AdamW optimizer and categorical cross-entropy loss
+    model.compile(optimizer=tf.keras.optimizers.AdamW(learning_rate = scheduled_lrs, weight_decay = 2e-4), 
+                  loss=tf.keras.losses.CategoricalCrossentropy(), 
+                  metrics=['accuracy'])
+    print(model.summary())
+
+    # Train the model
     history = train_model(model, train_dataset, val_dataset, class_weights, epochs = EPOCHS)
 
     # Save model
-    model.save_weights('./model/trained_model/music_classifier')
+    model.save_weights(model_save_path)
 
-    # Evaluate the model on the validation data
-    accuracy = evaluate_model(model, val_dataset)
-    print(f'Validation accuracy: {accuracy:.2f}')
+    # Evaluate the model using the confusion matrix
+    y_pred = model.predict(val_dataset)
+    y_pred_class = np.argmax(y_pred, axis=1)
+    y_true_class = np.argmax(val_labels, axis=1)
+    labels = np.unique(y_true_class)
+    conf_mat = create_confusion_matrix(y_true_class, y_pred_class, labels)
+
+# %% Main
 
 if __name__ == '__main__':
 
-    path = './dataset'
-    main(path)
+    dataset_path = 'dataset'
+    model_save_path = 'model/trained_model/music_classifier'
+    labels_dict_path = 'model/labels_dict.pkl'
+
+    main(dataset_path, model_save_path, labels_dict_path)
