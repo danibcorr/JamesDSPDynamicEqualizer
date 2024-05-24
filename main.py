@@ -1,6 +1,7 @@
 # %% Libraries
 
 import os
+import time
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 import tensorflow as tf
 from data.data_acquisition import process_audio_in_real_time
@@ -15,7 +16,7 @@ def main(model: tf.keras.Model) -> None:
     """
     Main function to process audio in real time, make predictions, and adjust equalizer settings.
 
-    Parameters:
+    Args:
         model (tf.keras.Model): The trained model for genre classification.
     """
 
@@ -39,6 +40,10 @@ def main(model: tf.keras.Model) -> None:
             
             # Apply the EQ profiles to the JamesDSP program based on the genre
             change_equalizer_settings(genre)
+
+            # Pause for 30 seconds before the next analysis
+            #print("Waiting for 30 seconds before the next audio analysis...")
+            #time.sleep(30)
 
     except KeyboardInterrupt:
 

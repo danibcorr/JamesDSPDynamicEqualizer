@@ -29,8 +29,8 @@ mixed_precision.set_global_policy('mixed_float16')
 # %% Constants
 
 SEED = 42
-BATCH_SIZE = 32
-EPOCHS = 1
+BATCH_SIZE = 50
+EPOCHS = 20
 INPUT_SHAPE = (224, 224, 3)
 
 # String to number class
@@ -166,7 +166,7 @@ def load_data_from_folder(path: str, input_shape: tuple = INPUT_SHAPE) -> tuple:
     # Convert the data and labels lists to numpy arrays and return them
     return np.array(data, dtype = np.uint8), np.array(labels)
 
-def create_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray, labels: list) -> None:
+def create_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray) -> None:
 
     """
     Create a confusion matrix from true labels and predicted labels.
@@ -174,14 +174,13 @@ def create_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray, labels: list
     Args:
         y_true (np.ndarray): True labels.
         y_pred (np.ndarray): Predicted labels.
-        labels (list): List of unique labels.
 
     Returns:
         np.ndarray: Confusion matrix.
     """
 
     # Calculate the confusion matrix
-    conf_mat = confusion_matrix(y_true, y_pred, labels=labels)
+    conf_mat = confusion_matrix(y_true, y_pred)
 
     # Display the confusion matrix
     plt.figure(figsize = (10, 7))
@@ -189,40 +188,6 @@ def create_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray, labels: list
     plt.xlabel('Predict', fontsize = 15, weight = 'bold')
     plt.ylabel('True', fontsize = 15, weight = 'bold')
     plt.show()
-
-def create_data_generators(train_data: np.ndarray, train_labels: np.ndarray, val_data: np.ndarray, val_labels: np.ndarray, batch_size: int = BATCH_SIZE) -> tuple:
-    
-    """
-    Create data generators for training and validation data.
-
-    Args:
-        train_data (np.ndarray): Training data.
-        train_labels (np.ndarray): Training labels.
-        val_data (np.ndarray): Validation data.
-        val_labels (np.ndarray): Validation labels.
-        batch_size (int): Batch size.
-
-    Returns:
-        train_generator: Data generator for training data.
-        val_generator: Data generator for validation data.
-    """
-
-    # Create an instance of the ImageDataGenerator for training data
-    train_datagen = ImageDataGenerator()
-    
-    # Create an instance of the ImageDataGenerator for validation data
-    val_datagen = ImageDataGenerator()
-
-    # Create a data generator for the training data using the flow method
-    # This will generate batches of the training data and labels
-    train_generator = train_datagen.flow(train_data, train_labels, batch_size=batch_size)
-    
-    # Create a data generator for the validation data using the flow method
-    # This will generate batches of the validation data and labels
-    val_generator = val_datagen.flow(val_data, val_labels, batch_size=batch_size)
-
-    # Return the training and validation data generators
-    return train_generator, val_generator
 
 def class_weights_calculation(labels: np.ndarray, y_train: np.ndarray) -> dict:
 
@@ -251,7 +216,7 @@ def class_weights_calculation(labels: np.ndarray, y_train: np.ndarray) -> dict:
     # Return the class weights
     return class_weights
 
-def train_model(model: keras.Model, train_dataset: tf.data.Dataset, val_dataset: tf.data.Dataset, class_weights: dict, epochs: int = EPOCHS) -> tf.keras.callbacks.History:
+def train_model(model: keras.Model, train_dataset: tuple, val_dataset: tuple, class_weights: dict, epochs: int = EPOCHS) -> tf.keras.callbacks.History:
     
     """
     Train the model on the training dataset.
@@ -268,7 +233,8 @@ def train_model(model: keras.Model, train_dataset: tf.data.Dataset, val_dataset:
     """
 
     # Train the model on the training dataset with the specified class weights
-    return model.fit(train_dataset, epochs=epochs, validation_data=val_dataset, class_weight=class_weights)
+    x_train, y_train = train_dataset 
+    return model.fit(x_train, y_train, epochs=epochs, validation_data=val_dataset, class_weight=class_weights)
 
 def evaluate_model(model: keras.Model, val_dataset: tf.data.Dataset) -> float:
 
@@ -323,12 +289,10 @@ def main(dataset_path: str, model_save_path: str, labels_dict_path: str) -> None
 
     # Split the data into training and validation sets
     train_data, val_data, train_labels, val_labels = train_test_split(data, labels_onehot, test_size=0.2, random_state=42, stratify=labels)
-    
+    print("Split data done.")
+
     # Calculate class weights to mitigate the class imbalance problem
     class_weights = class_weights_calculation(labels = labels, y_train = train_labels)
-
-    # Create data generators for the training and validation data
-    train_dataset, val_dataset = create_data_generators(train_data, train_labels, val_data, val_labels)
 
     # Total steps for the scheduler
     total_steps = int((len(train_data) / BATCH_SIZE) * EPOCHS)
@@ -345,17 +309,16 @@ def main(dataset_path: str, model_save_path: str, labels_dict_path: str) -> None
     print(model.summary())
 
     # Train the model
-    history = train_model(model, train_dataset, val_dataset, class_weights, epochs = EPOCHS)
+    history = train_model(model, (train_data, train_labels), (val_data, val_labels), class_weights, epochs = EPOCHS)
 
     # Save model
     model.save_weights(model_save_path)
-
+    
     # Evaluate the model using the confusion matrix
-    y_pred = model.predict(val_dataset)
-    y_pred_class = np.argmax(y_pred, axis=1)
-    y_true_class = np.argmax(val_labels, axis=1)
-    labels = np.unique(y_true_class)
-    conf_mat = create_confusion_matrix(y_true_class, y_pred_class, labels)
+    y_pred = model.predict(val_data)
+    y_pred_class = np.argmax(y_pred, axis = 1)
+    y_true_class = np.argmax(val_labels, axis = 1)
+    conf_mat = create_confusion_matrix(y_true_class, y_pred_class)
 
 # %% Main
 

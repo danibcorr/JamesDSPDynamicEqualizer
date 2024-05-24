@@ -7,6 +7,10 @@ from io import BytesIO
 import numpy as np
 from PIL import Image
 
+# %% Globals
+
+np.random.seed(42)
+
 # %% Functions
 
 def add_noise(audio: np.ndarray, noise_factor: float = 0.005) -> np.ndarray:
@@ -83,7 +87,7 @@ def time_masking(mel_spectrogram: np.ndarray, mask_percentage: float = 0.1) -> n
 
     return mel_spectrogram
 
-def apply_random_augmentations(chunk: np.ndarray) -> np.ndarray:
+def apply_random_augmentations(chunk: np.ndarray, idx: int) -> np.ndarray:
 
     """
     Apply random augmentations to the audio chunk.
@@ -95,33 +99,35 @@ def apply_random_augmentations(chunk: np.ndarray) -> np.ndarray:
         numpy array: The augmented audio chunk
     """
 
-    augmentation_type = np.random.choice(['noise', 'time_shift', 'frequency_masking', 'time_masking'])
-    
-    if augmentation_type == 'noise':
+    if idx != 0:
+            
+        augmentation_type = np.random.randint(6)
+        
+        if augmentation_type >= 0:
 
-        chunk = add_noise(chunk)
+            chunk = add_noise(chunk)
 
-    elif augmentation_type == 'time_shift':
+        if augmentation_type > 1:
 
-        chunk = time_shift(chunk)
+            chunk = time_shift(chunk)
 
-    elif augmentation_type in ['frequency_masking', 'time_masking']:
+        if augmentation_type > 2:
 
-        melspectrogram = librosa.feature.melspectrogram(y=chunk, sr=22050, n_mels=128)
+            melspectrogram = librosa.feature.melspectrogram(y=chunk, sr=22050, n_mels=128)
 
-        if augmentation_type == 'frequency_masking':
+            if augmentation_type > 3:
 
-            melspectrogram = frequency_masking(melspectrogram)
+                melspectrogram = frequency_masking(melspectrogram)
 
-        else:
+            if augmentation_type > 4:
 
-            melspectrogram = time_masking(melspectrogram)
+                melspectrogram = time_masking(melspectrogram)
 
-        chunk = librosa.griffinlim(melspectrogram)
+            chunk = librosa.griffinlim(melspectrogram)
 
     return chunk
 
-def music_2_melspectrogram(input_dir: str, duration: int = 30, sr: int = 22050, target_size: tuple = (224, 224)) -> None:
+def music_2_melspectrogram(input_dir: str, duration: int = 30, sr: int = 22050, target_size: tuple = (224, 224), num_samples: int = 6) -> None:
     
     """
     Convert audio files in a directory to Mel spectrograms and save them as numpy arrays.
@@ -145,45 +151,41 @@ def music_2_melspectrogram(input_dir: str, duration: int = 30, sr: int = 22050, 
 
             continue
 
-        for artist in os.listdir(genre_path):
+        for filename in os.listdir(genre_path):
 
-            artist_path = os.path.join(genre_path, artist)
+            if filename.endswith(('.mp3', '.wav', '.ogg', '.flac')):
 
-            if not os.path.isdir(artist_path):
-            
-                continue
+                # Load the audio file using librosa
+                audio, orig_sr = librosa.load(os.path.join(genre_path, filename))
 
-            for filename in os.listdir(artist_path):
+                # Resample the audio to the target sampling rate
+                audio = librosa.resample(y=audio, orig_sr=orig_sr, target_sr=sr)
 
-                if filename.endswith(('.mp3', '.wav', '.ogg', '.flac')):
+                # Calculate the number of frames needed for a 30-second spectrogram
+                num_frames = int(duration * sr)
 
-                    # Load the audio file using librosa
-                    audio, orig_sr = librosa.load(os.path.join(artist_path, filename))
+                # Initialize a variable to store the previous chunk
+                prev_chunk = np.array([])
 
-                    # Resample the audio to the target sampling rate
-                    audio = librosa.resample(y=audio, orig_sr=orig_sr, target_sr=sr)
+                for i in range(0, len(audio), num_frames):
 
-                    # Calculate the number of frames needed for a 30-second spectrogram
-                    num_frames = int(duration * sr)
+                    chunk = audio[i:i+num_frames]
 
-                    # Initialize a variable to store the previous chunk
-                    prev_chunk = np.array([])
+                    if len(chunk) < num_frames:
 
-                    for i in range(0, len(audio), num_frames):
+                        if len(prev_chunk) + len(chunk) >= num_frames:
 
-                        chunk = audio[i:i+num_frames]
+                            chunk = np.concatenate((prev_chunk[-(num_frames-len(chunk)):], chunk))
+                        
+                        else:
 
-                        if len(chunk) < num_frames:
+                            continue
+                    
+                    og_chunk = chunk
 
-                            if len(prev_chunk) + len(chunk) >= num_frames:
-
-                                chunk = np.concatenate((prev_chunk[-(num_frames-len(chunk)):], chunk))
+                    for idx in range(num_samples):
                             
-                            else:
-
-                                continue
-
-                        chunk = apply_random_augmentations(chunk)
+                        chunk = apply_random_augmentations(og_chunk, idx)
                         melspectrogram = librosa.feature.melspectrogram(y=chunk, sr=sr, n_mels=128)
                         melspectrogram = librosa.power_to_db(melspectrogram, ref=np.max)
                         melspectrogram = ((melspectrogram - melspectrogram.min()) / (melspectrogram.max() - melspectrogram.min())) * 255
@@ -197,16 +199,16 @@ def music_2_melspectrogram(input_dir: str, duration: int = 30, sr: int = 22050, 
                         buf = BytesIO()
                         plt.imsave(buf, melspectrogram, cmap='viridis', format='png')
                         
-                        with open(os.path.join(input_dir, genre, f'{filename}_{i//num_frames}.png'), 'wb') as f:
+                        with open(os.path.join(input_dir, genre, f'{filename}_{i//num_frames}_{idx}.png'), 'wb') as f:
                             
                             f.write(buf.getvalue())
 
-                        prev_chunk = chunk
+                    prev_chunk = og_chunk
 
 # %% Main
 
 if __name__ == '__main__':
     
-    input_dir = './dataset'
+    input_dir = '/home/dani/Pictures/music_dataset/'
     duration = 30
     music_2_melspectrogram(input_dir, duration)
