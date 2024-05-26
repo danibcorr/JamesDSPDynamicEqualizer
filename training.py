@@ -3,75 +3,60 @@
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 
+import mlflow
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers, mixed_precision
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
 import numpy as np
 from sklearn.metrics import confusion_matrix
 import random
 from sklearn.model_selection import train_test_split
-from sklearn.utils.class_weight import compute_class_weight
 from PIL import Image
 import dask.array as da
 from dask.delayed import delayed
-from model.architecture import build_model_pretrained
-import pickle
 import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')
 import seaborn as sns
+
 from model.schedulers.warmupcosine import WarmUpCosine
-from model.architecture import build_model_pretrained
+from model.architecture import build_model_pretrained, build_model_scratch
+from model.layers.CutMix import cut_mix
+import config as cg
 
 # %% Let's use mixed precision to reduce memory consumption.
 
 mixed_precision.set_global_policy('mixed_float16')
 
-# %% Constants
-
-SEED = 42
-BATCH_SIZE = 50
-EPOCHS = 20
-INPUT_SHAPE = (224, 224, 3)
-
-# String to number class
-DICT_LABELS = {
-    "classical": 0, 
-    "flamenco": 1, 
-    "hiphop": 2, 
-    "jazz": 3, 
-    "pop": 4,
-    "r&b": 5,
-    "reggaeton": 6
-}
-
 # %% Functions
 
-def create_label_dict(labels: np.ndarray) -> dict:
-    
-    """
-    Create a dictionary mapping label indices to label names.
+def mlflow_connection() -> str:
 
-    Args:
-        labels (np.ndarray): List of unique labels.
+    """
+    Establishes a connection with MLflow for experiment tracking and logging.
+
+    This function sets the tracking server URI to http://127.0.0.1:8080 for logging.
+    It creates a new MLflow experiment named "Music Classifier" and enables system metrics logging.
+
+    Note:
+        - Make sure MLflow is installed and running on the specified URI before calling this function.
+        - Ensure that the tracking server URI is correctly configured for your MLflow setup.
 
     Returns:
-        dict: Label dictionary.
-    """
-    
-    return {i: label for i, label in enumerate(labels)}
-
-def save_label_dict(label_dict: dict, file_path: str) -> None:
-
-    """
-    Save the label dictionary to a file using pickle.
-
-    Args:
-        file_path (str): File path to save the dictionary.
+        str: The name of the run.
     """
 
-    with open(file_path, 'wb') as f:
+    # Set the tracking server URI for logging
+    mlflow.set_tracking_uri(uri = "http://127.0.0.1:8080")
 
-        pickle.dump(label_dict, f)
+    # Create a new MLflow Experiment
+    mlflow.set_experiment("Music Classifier")
+
+    # Enable system metrics logging
+    mlflow.enable_system_metrics_logging()
+
+    # Autolog for tensorflow
+    mlflow.tensorflow.autolog()
 
 def seed_init(seed: int) -> None:
 
@@ -92,14 +77,13 @@ def seed_init(seed: int) -> None:
     tf.random.set_seed(seed)
     random.seed(seed)
 
-def load_image(file_path: str, input_shape: tuple) -> np.ndarray or None:
+def load_image(file_path: str) -> np.ndarray or None:
 
     """
     Load an image from a file path and resize it to the input shape.
 
     Args:
         file_path (str): The path to the image file.
-        input_shape (tuple): The target size for the loaded image.
 
     Returns:
         numpy array: The loaded image as a numpy array, or None if there's an error.
@@ -111,15 +95,10 @@ def load_image(file_path: str, input_shape: tuple) -> np.ndarray or None:
         img = Image.open(file_path)
         
         # Convert the image to RGB mode
-        img = img.convert('RGB')
-        
-        # Resize the image to the input shape
-        img = img.resize(input_shape)
+        img = img.convert('L')
         
         # Convert the image to a numpy array
-        img_array = np.array(img)
-        
-        return img_array
+        return np.array(img, dtype = np.uint8)
 
     except OSError:
 
@@ -128,7 +107,7 @@ def load_image(file_path: str, input_shape: tuple) -> np.ndarray or None:
 
         return None
 
-def load_data_from_folder(path: str, input_shape: tuple = INPUT_SHAPE) -> tuple:
+def load_data_from_folder(path: str, input_shape: tuple) -> tuple:
 
     """
     Load image data from a folder structure where each subfolder represents a class.
@@ -153,7 +132,7 @@ def load_data_from_folder(path: str, input_shape: tuple = INPUT_SHAPE) -> tuple:
         file_paths = [os.path.join(class_folder, file_name) for file_name in os.listdir(class_folder) if file_name.endswith('.png')]
         
         # Load the images in parallel using dask
-        img_arrays = [delayed(load_image)(file_path, (input_shape[0], input_shape[1])) for file_path in file_paths]
+        img_arrays = [delayed(load_image)(file_path) for file_path in file_paths]
         img_arrays = da.compute(*img_arrays)
         
         # Filter out any images that failed to load
@@ -161,12 +140,12 @@ def load_data_from_folder(path: str, input_shape: tuple = INPUT_SHAPE) -> tuple:
         
         # Add the loaded images and labels to the data and labels lists
         data.extend(img_arrays)
-        labels.extend([DICT_LABELS[class_name]] * len(img_arrays))
+        labels.extend([cg.DICT_LABELS[class_name]] * len(img_arrays))
 
     # Convert the data and labels lists to numpy arrays and return them
-    return np.array(data, dtype = np.uint8), np.array(labels)
+    return np.expand_dims(np.array(data, dtype = np.uint8), -1), np.array(labels)
 
-def create_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray) -> None:
+def create_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray, run_name: str) -> None:
 
     """
     Create a confusion matrix from true labels and predicted labels.
@@ -187,36 +166,9 @@ def create_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray) -> None:
     sns.heatmap(conf_mat, annot = True, fmt = 'd', cmap = 'Reds')
     plt.xlabel('Predict', fontsize = 15, weight = 'bold')
     plt.ylabel('True', fontsize = 15, weight = 'bold')
-    plt.show()
+    plt.savefig(f'model/trained_model/confusion_matrix_{run_name}.png')
 
-def class_weights_calculation(labels: np.ndarray, y_train: np.ndarray) -> dict:
-
-    """
-    Calculate class weights to address class imbalance in the dataset.
-
-    This function calculates the class weights using the 'balanced' method, which
-    assigns more weight to classes with lower frequencies in the dataset.
-
-    Args:
-        labels (np.ndarray): The labels of the dataset.
-        y_train (np.ndarray): The one-hot encoded labels of the training set.
-
-    Returns:
-        dict: The class weights.
-    """
-
-    # Calculate the class weights using the 'balanced' method
-    class_weights = compute_class_weight(class_weight='balanced', 
-                                         classes=np.unique(labels), 
-                                         y=np.argmax(y_train, axis=-1))
-    
-    # Convert the class weights to a dictionary
-    class_weights = dict(enumerate(class_weights))
-    
-    # Return the class weights
-    return class_weights
-
-def train_model(model: keras.Model, train_dataset: tuple, val_dataset: tuple, class_weights: dict, epochs: int = EPOCHS) -> tf.keras.callbacks.History:
+def train_model(model: keras.Model, train_dataset: tuple, val_dataset: tuple, epochs: int) -> tf.keras.callbacks.History:
     
     """
     Train the model on the training dataset.
@@ -225,18 +177,19 @@ def train_model(model: keras.Model, train_dataset: tuple, val_dataset: tuple, cl
         model (keras.Model): The model to be trained.
         train_dataset (tf.data.Dataset): The training dataset.
         val_dataset (tf.data.Dataset): The validation dataset.
-        class_weights (dict): The class weights to address class imbalance.
         epochs (int): The number of epochs to train the model. Defaults to EPOCHS.
 
     Returns:
         tf.keras.callbacks.History: The training history.
     """
 
-    # Train the model on the training dataset with the specified class weights
-    x_train, y_train = train_dataset 
-    return model.fit(x_train, y_train, epochs=epochs, validation_data=val_dataset, class_weight=class_weights)
+    with mlflow.start_run() as run:
 
-def evaluate_model(model: keras.Model, val_dataset: tf.data.Dataset) -> float:
+        history = model.fit(x = train_dataset[0], y = train_dataset[1], epochs = epochs, batch_size = cg.BATCH_SIZE, validation_data = val_dataset)
+
+    return history, run
+
+def evaluate_model(model: keras.Model, val_data: np.ndarray, val_labels: np.ndarray, run_name: str) -> None:
 
     """
     Evaluate the model on the validation dataset.
@@ -249,11 +202,11 @@ def evaluate_model(model: keras.Model, val_dataset: tf.data.Dataset) -> float:
         float: The accuracy of the model on the validation dataset.
     """
 
-    # Evaluate the model on the validation dataset
-    loss, accuracy = model.evaluate(val_dataset)
-    
-    # Return the accuracy
-    return accuracy
+    # Evaluate the model using the confusion matrix
+    y_pred = model.predict(val_data)
+    y_pred_class = np.argmax(y_pred, axis = 1)
+    y_true_class = np.argmax(val_labels, axis = 1)
+    conf_mat = create_confusion_matrix(y_true_class, y_pred_class, run_name)
 
 def main(dataset_path: str, model_save_path: str, labels_dict_path: str) -> None:
 
@@ -267,16 +220,20 @@ def main(dataset_path: str, model_save_path: str, labels_dict_path: str) -> None
         None
     """
 
+    # MLflow connection
+    mlflow_connection()
+
     # Initialize the seeds for reproducible results
-    seed_init(seed = SEED)
+    seed_init(seed = cg.SEED)
 
     # Load data from the specified folder
-    data, labels = load_data_from_folder(dataset_path)
+    data, labels = load_data_from_folder(dataset_path, cg.INPUT_SHAPE)
     classes = np.unique(labels)
     num_classes = len(classes)
 
     # Print information about the data
-    print(f"Num data: {data.shape}")
+    print(f"Data shape: {data.shape}")
+    print(f"Label shape: {labels.shape}")
     print(f"Num classes: {num_classes}")
     print(f"Min val: {np.min(data)}")
     print(f"Max val: {np.max(data)}")
@@ -288,37 +245,54 @@ def main(dataset_path: str, model_save_path: str, labels_dict_path: str) -> None
     labels_onehot = tf.keras.utils.to_categorical(labels, num_classes = num_classes)
 
     # Split the data into training and validation sets
-    train_data, val_data, train_labels, val_labels = train_test_split(data, labels_onehot, test_size=0.2, random_state=42, stratify=labels)
-    print("Split data done.")
+    train_data, val_data, train_labels, val_labels = train_test_split(data, labels_onehot, test_size = cg.test_size_split, random_state = cg.SEED, stratify = labels)
+    print("Split data, training and validation, done.")
 
-    # Calculate class weights to mitigate the class imbalance problem
-    class_weights = class_weights_calculation(labels = labels, y_train = train_labels)
+    # Split training data in two datasets to use CutMix
+    train_data_1, train_data_2, train_labels_1, train_labels_2 = train_test_split(train_data, train_labels, test_size = 0.5, random_state = cg.SEED)
+    print("Split data, 2 training, done.")
+
+    # Apply CutMix
+    train_data_cutmix_data, train_data_cutmix_labels = cut_mix((train_data_1, train_labels_1), (train_data_2, train_labels_2), alpha = 1, beta = 1)
+
+    # Combine the datasets
+    combined_train_data = np.concatenate((train_data, train_data_cutmix_data), axis = 0)
+    combined_train_labels = np.concatenate((train_labels, train_data_cutmix_labels), axis = 0)
+    
+    # Print information about the data
+    print(f"Data shape: {combined_train_data.shape}")
+    print(f"Label shape: {combined_train_labels.shape}")
+    print(f"Num classes: {num_classes}")
+    print(f"Min val: {np.min(data)}")
+    print(f"Max val: {np.max(data)}")
 
     # Total steps for the scheduler
-    total_steps = int((len(train_data) / BATCH_SIZE) * EPOCHS)
-    warmup_steps = int(total_steps * 0.15)
-    scheduled_lrs = WarmUpCosine(lr_start = 1e-5, lr_max = 1e-3, warmup_steps = warmup_steps, total_steps = total_steps)
+    total_steps = int((len(combined_train_data) / cg.BATCH_SIZE) * cg.EPOCHS)
+    warmup_steps = int(total_steps * cg.warmup_p)
+    scheduled_lrs = WarmUpCosine(lr_start = cg.lr_start, lr_max = cg.lr_max, warmup_steps = warmup_steps, total_steps = total_steps)
                  
     # Build the classification model
-    model = build_model_pretrained(INPUT_SHAPE, num_classes)
+    #model = build_model_pretrained(INPUT_SHAPE, num_classes)
+    model = build_model_scratch(cg.INPUT_SHAPE, num_classes)
 
     # Compile the model with the AdamW optimizer and categorical cross-entropy loss
-    model.compile(optimizer=tf.keras.optimizers.AdamW(learning_rate = scheduled_lrs, weight_decay = 2e-4), 
-                  loss=tf.keras.losses.CategoricalCrossentropy(), 
-                  metrics=['accuracy'])
+    model.compile(optimizer = tf.keras.optimizers.AdamW(learning_rate = scheduled_lrs, weight_decay = cg.weight_decay), 
+                  loss = tf.keras.losses.CategoricalCrossentropy(), 
+                  metrics = ['accuracy'])
     print(model.summary())
 
     # Train the model
-    history = train_model(model, (train_data, train_labels), (val_data, val_labels), class_weights, epochs = EPOCHS)
+    history, run = train_model(model, (combined_train_data, combined_train_labels), (val_data, val_labels), epochs = cg.EPOCHS)
 
     # Save model
     model.save_weights(model_save_path)
-    
-    # Evaluate the model using the confusion matrix
-    y_pred = model.predict(val_data)
-    y_pred_class = np.argmax(y_pred, axis = 1)
-    y_true_class = np.argmax(val_labels, axis = 1)
-    conf_mat = create_confusion_matrix(y_true_class, y_pred_class)
+
+    # Get the ID of the current run
+    run_info = mlflow.get_run(run.info.run_id)
+    run_name = run_info.data.tags['mlflow.runName']
+
+    # Show confusion matrix for model evaluation
+    evaluate_model(model, val_data, val_labels, run_name)
 
 # %% Main
 

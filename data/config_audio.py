@@ -1,0 +1,6 @@
+# %% Spectrograms parameters
+
+SAMPLE_RATE = 22050
+RECORD_SEC = 10
+N_MELS = 128
+RECORD_SEC_INFERENCE = 3

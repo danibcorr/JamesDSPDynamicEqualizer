@@ -1,43 +1,17 @@
 # %% Libraries
 
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
+
 import tensorflow as tf
 from .architecture import build_model_pretrained
 import pickle
 import numpy as np
-
-# %% Globals
-
-# String to number class
-DICT_LABELS = {
-    0: "classical", 
-    1: "flamenco", 
-    2: "hiphop", 
-    3: "jazz", 
-    4: "pop",
-    5: "r&b",
-    6: "reggaeton"
-}
+import config as cg
 
 # %% Functions
 
-def load_label_dict(file_path: str) -> dict:
-    
-    """
-    Load the label dictionary from a file using pickle.
-
-    Args:
-        file_path (str): File path to load the dictionary.
-
-    Returns:
-        dict: Loaded label dictionary.
-    """
-
-    with open(file_path, 'rb') as f:
-        
-        return pickle.load(f)
-
-    
-def load_model(model_path: str, input_shape: tuple = (224, 224, 3), num_classes: int = len(DICT_LABELS)) -> tf.keras.Model:
+def load_model(model_path: str, input_shape: tuple = cg.INPUT_SHAPE, num_classes: int = len(cg.DICT_LABELS)) -> tf.keras.Model:
 
     """
     Load a pre-trained model from a file and return it.
@@ -77,4 +51,4 @@ def make_prediction(model: tf.keras.Model, data) -> str:
     prediction = np.argmax(model.predict(data))
     
     # Get the corresponding label from the dictionary
-    return DICT_LABELS[prediction]
+    return cg.DICT_LABELS[prediction]

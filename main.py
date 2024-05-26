@@ -1,8 +1,9 @@
 # %% Libraries
 
 import os
-import time
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
+
+import time
 import tensorflow as tf
 from data.data_acquisition import process_audio_in_real_time
 from model.inference import load_model, make_prediction, load_label_dict
