@@ -56,7 +56,7 @@ def mlflow_connection() -> str:
     mlflow.enable_system_metrics_logging()
 
     # Autolog for tensorflow
-    mlflow.tensorflow.autolog()
+    mlflow.tensorflow.autolog(log_datasets = False)
 
 def seed_init(seed: int) -> None:
 
@@ -91,14 +91,9 @@ def load_image(file_path: str) -> np.ndarray or None:
 
     try:
 
-        # Open the image file
-        img = Image.open(file_path)
-        
-        # Convert the image to RGB mode
-        img = img.convert('L')
-        
+        # Open the image file and convert the image to grayscale mode
         # Convert the image to a numpy array
-        return np.array(img, dtype = np.uint8)
+        return np.array(Image.open(file_path).convert('L'), dtype = np.uint8)
 
     except OSError:
 
@@ -143,7 +138,7 @@ def load_data_from_folder(path: str, input_shape: tuple) -> tuple:
         labels.extend([cg.DICT_LABELS[class_name]] * len(img_arrays))
 
     # Convert the data and labels lists to numpy arrays and return them
-    return np.expand_dims(np.array(data, dtype = np.uint8), -1), np.array(labels)
+    return np.expand_dims(np.array(data, dtype = np.uint8), -1), np.array(labels, dtype = np.float32)
 
 def create_confusion_matrix(y_true: np.ndarray, y_pred: np.ndarray, run_name: str) -> None:
 
@@ -247,6 +242,7 @@ def main(dataset_path: str, model_save_path: str, labels_dict_path: str) -> None
     # Split the data into training and validation sets
     train_data, val_data, train_labels, val_labels = train_test_split(data, labels_onehot, test_size = cg.test_size_split, random_state = cg.SEED, stratify = labels)
     print("Split data, training and validation, done.")
+    del data, labels, labels_onehot
 
     # Split training data in two datasets to use CutMix
     train_data_1, train_data_2, train_labels_1, train_labels_2 = train_test_split(train_data, train_labels, test_size = 0.5, random_state = cg.SEED)
@@ -254,17 +250,17 @@ def main(dataset_path: str, model_save_path: str, labels_dict_path: str) -> None
 
     # Apply CutMix
     train_data_cutmix_data, train_data_cutmix_labels = cut_mix((train_data_1, train_labels_1), (train_data_2, train_labels_2), alpha = 1, beta = 1)
+    del train_data_1, train_data_2, train_labels_1, train_labels_2
 
     # Combine the datasets
     combined_train_data = np.concatenate((train_data, train_data_cutmix_data), axis = 0)
     combined_train_labels = np.concatenate((train_labels, train_data_cutmix_labels), axis = 0)
+    del train_data, train_labels, train_data_cutmix_data, train_data_cutmix_labels
     
     # Print information about the data
     print(f"Data shape: {combined_train_data.shape}")
     print(f"Label shape: {combined_train_labels.shape}")
     print(f"Num classes: {num_classes}")
-    print(f"Min val: {np.min(data)}")
-    print(f"Max val: {np.max(data)}")
 
     # Total steps for the scheduler
     total_steps = int((len(combined_train_data) / cg.BATCH_SIZE) * cg.EPOCHS)

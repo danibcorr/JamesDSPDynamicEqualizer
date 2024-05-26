@@ -6,9 +6,12 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import time
 import tensorflow as tf
 from data.data_acquisition import process_audio_in_real_time
-from model.inference import load_model, make_prediction, load_label_dict
+from model.inference import load_model, make_prediction
 from data.command_equalization import change_equalizer_settings
 import numpy as np
+from data import config_audio as cg 
+from PIL import Image
+import io
 
 # %% Functions
 
@@ -27,14 +30,13 @@ def main(model: tf.keras.Model) -> None:
 
             # Obtain the current audio for processing to a spectrogram
             spectrogram = process_audio_in_real_time()
-            print("Obtained spectrogram.")
+
+            # Load the PNG image from the byte array
+            spectrogram = np.array(Image.open(io.BytesIO(spectrogram)).convert('L'), dtype = np.uint8)
 
             # Add batch dimension and channel dimension
-            spectrogram = spectrogram.reshape((1, 224, 224, 1))
-
-            # Repeat the channel dimension 3 times  
-            spectrogram = np.repeat(spectrogram, 3, axis=3)  
-
+            spectrogram = np.expand_dims(spectrogram, [0, -1])
+            
             # Perform the prediction of the model to obtain the genre of the song
             genre = make_prediction(model, spectrogram)
             print(f"Genre: {genre}")

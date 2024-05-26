@@ -4,7 +4,8 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 
 import tensorflow as tf
-from .architecture import build_model_pretrained
+from tensorflow.keras import layers
+from .architecture import build_model_pretrained, build_model_scratch
 import pickle
 import numpy as np
 import config as cg
@@ -25,13 +26,10 @@ def load_model(model_path: str, input_shape: tuple = cg.INPUT_SHAPE, num_classes
         tf.keras.Model: Loaded model.
     """
 
-    # Build the model
-    model = build_model_pretrained(input_shape, num_classes)
-    
-    # Load the weights of the model
+    #  Build and load the model
+    model = build_model_scratch((128, 129, 1), num_classes)
     model.load_weights(model_path)
-    
-    # Return the model
+
     return model
 
 def make_prediction(model: tf.keras.Model, data) -> str:
@@ -51,4 +49,4 @@ def make_prediction(model: tf.keras.Model, data) -> str:
     prediction = np.argmax(model.predict(data))
     
     # Get the corresponding label from the dictionary
-    return cg.DICT_LABELS[prediction]
+    return cg.DICT_LABELS_PREDICT[prediction]

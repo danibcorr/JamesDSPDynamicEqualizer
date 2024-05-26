@@ -25,26 +25,14 @@ def data_augmentation_layer(inputs: tf.Tensor, seed: int = 42) -> tf.Tensor:
     Returns:
         tf.Tensor: The augmented input data.
     """
-    
-    tf.random.set_seed(seed)
 
-    x = inputs
+    data_augmentation = tf.keras.Sequential([
+        keras_cv.layers.GridMask(ratio_factor = (0, 0.5), rotation_factor = 0, fill_mode = "constant", fill_value = 0.0, seed = seed),
+        layers.GaussianNoise(stddev = 0.1, seed = seed),
+        layers.RandomFlip("horizontal", seed = seed)
+        ], name = "data_augmentation")
 
-    if tf.random.uniform([]) < 0.5:
-
-        x = keras_cv.layers.GridMask(ratio_factor = (0, 0.5), rotation_factor = 0, fill_mode = "constant", fill_value = 0.0, seed = seed)(x)
-
-    x = layers.RandomCrop(height = 128, width = 128, seed = seed)(x)
-
-    if tf.random.uniform([]) < 0.5:
-        
-        x = layers.GaussianNoise(stddev = 0.1, seed = seed)(x)
-
-    if tf.random.uniform([]) < 0.5:
-        
-        x = layers.RandomFlip("horizontal", seed = seed)(x)
-
-    return x
+    return data_augmentation(inputs)
 
 # %% ConvNeXtSmall pretrained model
 
@@ -391,7 +379,6 @@ class TokenLearnerModule(tf.keras.Model):
         # Aggregate features using the selected tokens
         return tf.einsum('...si,...id->...sd', selected, feat)  
 
-
 def build_model_scratch(input_shape: tuple, num_classes: int, fc_layers: list = [256, 128], dropout: float = 0.2, num_heads: int = 2, transformer_layers: int = 2,
                         stochastic_depth_rate: float = 0.1, eps: float = 1e-6) -> keras.Model:
     
@@ -414,8 +401,11 @@ def build_model_scratch(input_shape: tuple, num_classes: int, fc_layers: list = 
     
     inputs = layers.Input(input_shape)
 
+    # Apply random crop to have images of 128 x 128
+    x = layers.RandomCrop(height = 128, width = 128, seed = cg.SEED)(inputs)
+
     # Augment data.
-    augmented = data_augmentation_layer(inputs)
+    augmented = data_augmentation_layer(x)
 
     # Encode patches.
     cct_tokenizer = CCTTokenizer()
