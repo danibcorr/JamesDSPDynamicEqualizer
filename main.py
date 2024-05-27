@@ -15,7 +15,7 @@ import io
 
 # %% Functions
 
-def main(model: tf.keras.Model) -> None:
+def main(model: tf.keras.Model, num_samples: int = 3) -> None:
 
     """
     Main function to process audio in real time, make predictions, and adjust equalizer settings.
@@ -28,25 +28,28 @@ def main(model: tf.keras.Model) -> None:
 
         while True:
 
-            # Obtain the current audio for processing to a spectrogram
-            spectrogram = process_audio_in_real_time()
-
-            # Load the PNG image from the byte array
-            spectrogram = np.array(Image.open(io.BytesIO(spectrogram)).convert('L'), dtype = np.uint8)
-
-            # Add batch dimension and channel dimension
-            spectrogram = np.expand_dims(spectrogram, [0, -1])
+            # Obtain 3 spectrograms
+            spectrograms = []
             
-            # Perform the prediction of the model to obtain the genre of the song
-            genre = make_prediction(model, spectrogram)
+            for _ in range(num_samples):
+
+                spectrogram = process_audio_in_real_time()
+                spectrogram = np.array(Image.open(io.BytesIO(spectrogram)).convert('L'), dtype = np.uint8)
+                spectrogram = np.expand_dims(spectrogram, [0, -1])
+                spectrograms.append(spectrogram)
+
+            spectrograms = np.array(spectrograms).reshape(num_samples, 128, 129, 1)
+
+            # Make predictions for each spectrogram
+            genre = make_prediction(model, spectrograms)
             print(f"Genre: {genre}")
-            
+
             # Apply the EQ profiles to the JamesDSP program based on the genre
             change_equalizer_settings(genre)
 
             # Pause for 30 seconds before the next analysis
-            #print("Waiting for 30 seconds before the next audio analysis...")
-            #time.sleep(30)
+            print("Waiting for 30 seconds before the next audio analysis...")
+            time.sleep(30)
 
     except KeyboardInterrupt:
 

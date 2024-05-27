@@ -32,7 +32,7 @@ def load_model(model_path: str, input_shape: tuple = cg.INPUT_SHAPE, num_classes
 
     return model
 
-def make_prediction(model: tf.keras.Model, data) -> str:
+def make_prediction(model: tf.keras.Model, data: np.ndarray) -> str:
 
     """
     Make a prediction using a loaded model.
@@ -46,7 +46,14 @@ def make_prediction(model: tf.keras.Model, data) -> str:
     """
 
     # Make a prediction using the model
-    prediction = np.argmax(model.predict(data))
+    prediction = model.predict(data)
+    product_probs = np.prod(prediction, axis = 0)
+
+    # Normalize probabilities
+    product_probs /= np.sum(product_probs)
+
+    # Obtain the key of the dictionary to obtain the label
+    key_genre = np.argmax(product_probs)
     
     # Get the corresponding label from the dictionary
-    return cg.DICT_LABELS_PREDICT[prediction]
+    return cg.DICT_LABELS_PREDICT[key_genre]
