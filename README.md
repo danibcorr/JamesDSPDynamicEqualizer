@@ -2,7 +2,7 @@
 
 ## 📋 Description
 
-This project analyzes the audio being played on your computer, converts it into a MEL spectrogram, and uses a deep learning model to classify the music genre. Based on the detected genre, it sends a command to JamesDSP to adjust the music equalization according to the genre-specific profile.
+This project analyzes the audio being played on your computer, converts it into a MEL spectrogram, and uses a deep learning model to classify the music genre. Based on the detected genre, it sends a command to [JamesDSP](https://github.com/Audio4Linux/JDSP4Linux) to adjust the music equalization according to the genre-specific profile.
 
 ## 🧩 Features
 
@@ -11,9 +11,28 @@ This project analyzes the audio being played on your computer, converts it into 
 - **Music Genre Classification**: Utilizes a deep learning model to classify the genre of the audio.
 - **Automatic Equalization Adjustment**: Sends commands to JamesDSP to adjust the equalization based on the detected music genre.
 
+## 🛠️ Installation
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/music-genre-classifier.git
+   cd music-genre-classifier
+   ```
+
+2. Create a virtual environment (optional but recommended):
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+   ```
+
+3. Install the required packages:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
 ## 🕹️ Usage
 
-1. Start the main script to begin monitoring audio and adjusting equalization.
+1. Start the main script to begin monitoring audio and adjusting equalization:
    ```bash
    python main.py
    ```
