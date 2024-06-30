@@ -18,7 +18,9 @@ In a Mel spectrogram, the audio signal is divided into small time windows. For e
 
 `N_MELS` determines the number of frequency bands considered in the Mel spectrogram. A higher value of `N_MELS` provides greater frequency resolution but also increases computational complexity.
 
-![Image](../images/ImageSpectrogram.png)
+<p align="center">
+  <img src="../images/ImageSpectrogram.png" />
+</p>
 
 In a Mel spectrogram, the height of the spectrogram (number of rows) corresponds to the number of Mel filters used. Each Mel filter captures the energy in a particular frequency band, so each row of the spectrogram represents the energy in a different frequency band. A higher value of `N_MELS` results in a spectrogram with more rows and higher frequency resolution, but it also increases computational complexity. It is crucial to balance frequency resolution and computational efficiency when choosing `N_MELS`.
 
@@ -28,7 +30,9 @@ $$
 
 The sampling rate of 22050 Hz is frequently used because it is sufficient to capture most of the frequencies audible to the human ear. It is used because the Mel scale considers the logarithmic perception of sound, and this rate remains adequate for most applications without sacrificing perceived quality.
 
-![Image](https://www.tutorialexample.com/wp-content/uploads/2022/04/understand-hop_length-win_length-in-audio-processing-300x228.png)
+<p align="center">
+  <img src="https://www.tutorialexample.com/wp-content/uploads/2022/04/understand-hop_length-win_length-in-audio-processing-300x228.png" />
+</p>
 
 The `hop length` refers to the number of samples between successive windows when applying a Fourier transform to an audio signal. A `hop length` of 512, for example, means that the next window starts halfway through the current window. This affects the temporal resolution of the analysis: a smaller `hop length` provides higher temporal resolution at the cost of increased computational complexity, while a larger `hop length` reduces temporal resolution but is computationally cheaper.
 
