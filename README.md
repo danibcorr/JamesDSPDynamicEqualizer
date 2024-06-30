@@ -4,6 +4,8 @@
 
 This project analyzes the audio being played on your computer, converts it into a MEL spectrogram, and uses a deep learning model to classify the music genre. Based on the detected genre, it sends a command to [JamesDSP](https://github.com/Audio4Linux/JDSP4Linux) to adjust the music equalization according to the genre-specific profile.
 
+If you want to know more about the reason for certain selected parameters of the Mel programs, please visit the [following document](./documentation/explanations.md).
+
 ## 🧩 Features
 
 - **Audio Capture**: Monitors and captures the audio being played on your computer.
